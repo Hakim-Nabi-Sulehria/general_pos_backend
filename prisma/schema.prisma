@@ -1,0 +1,395 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Roles
+enum Role {
+  SUPERADMIN
+  ADMIN
+  MANAGER
+  CASHIER
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  password       String
+  name           String?
+  role           Role         @default(CASHIER)
+  isActive       Boolean      @default(true)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+
+  sales            Sale[]
+  purchases        Purchase[]
+  adjustments      InventoryAdjustment[]
+  transfers        StockTransfer[] // Fixed Typo
+  processedReturns SaleReturn[]
+  sentRequests     CashRequest[]         @relation("SentRequests")
+  approvedRequests CashRequest[]         @relation("Approvals")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  address   String
+  phone     String?
+  currency  String   @default("PKR")
+  timezone  String   @default("UTC")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  branches  Branch[]
+  users     User[]
+}
+
+model Branch {
+  id                   String                @id @default(cuid())
+  name                 String
+  code                 String?               @unique
+  address              String?
+  contactNumber        String?
+  organizationId       String
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users                User[]
+  products             Product[]
+  suppliers            Supplier[]
+  purchases            Purchase[]
+  inventoryAdjustments InventoryAdjustment[]
+  stockTransfersFrom   StockTransfer[]       @relation("fromBranch") // Fixed Typo
+  stockTransfersTo     StockTransfer[]       @relation("toBranch") // Fixed Case
+  sales                Sale[]
+  cashBalance          Float                 @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
+  discounts   Discount[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Product {
+  id                   String                @id @default(cuid())
+  name                 String
+  sku                  String?
+  barcode              String?
+  categoryId           String
+  branchId             String
+  category             Category              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  branch               Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  material             String?
+  shape                String?
+  weight               String?
+  color                String?
+  price                Float
+  cost                 Float
+  unit                 String                @default("pcs")
+  isActive             Boolean               @default(true)
+  stockQuantity        Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  purchaseItems        PurchaseItem[]
+  inventoryAdjustments InventoryAdjustment[]
+  stockTransfers       StockTransfer[] // Fixed Typo
+  discounts            Discount[]
+  saleItems            SaleItem[]
+  returnItems          SaleReturnItem[]
+
+  @@unique([sku, branchId])
+  @@unique([barcode, branchId])
+}
+
+model Discount {
+  id    String       @id @default(cuid())
+  name  String
+  code  String?      @unique
+  type  DiscountType
+  value Float
+
+  config Json? // BOGO waghaira ke liye theek hai
+
+  scope DiscountScope
+
+  products   Product[]
+  categories Category[]
+
+  // --- YE LINE ADD KAREIN ---
+  minQuantity Int? @default(1) // <-- Ye missing thi jo error de rahi thi
+  // -------------------------
+
+  minPurchase Float @default(0)
+  usageLimit  Int?
+  usedCount   Int   @default(0)
+
+  validFrom  DateTime @default(now())
+  validUntil DateTime
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+}
+
+// Enums bana len taakay typos na hon
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+  BOGO
+  BULK
+}
+
+enum DiscountScope {
+  PRODUCT
+  CATEGORY
+  GLOBAL
+}
+
+model Supplier {
+  id        String     @id @default(cuid())
+  name      String
+  email     String     @unique
+  phone     String?
+  address   String
+  branchId  String
+  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  purchases Purchase[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Purchase {
+  id          String         @id @default(cuid())
+  supplierId  String // Fixed casing
+  supplier    Supplier       @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?          @relation(fields: [createdById], references: [id])
+  totalAmount Float
+  items       PurchaseItem[]
+  status      Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Link to Accounting
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  journalEntryId String?
+}
+
+model PurchaseItem {
+  id            String   @id @default(cuid())
+  purchaseId    String
+  purchase      Purchase @relation(fields: [purchaseId], references: [id])
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  discount      Float    @default(0) // Fixed casing
+  totalDiscount Float    @default(0) // Renamed from total_d for clarity
+  costPrice     Float
+  total         Float
+}
+
+model InventoryAdjustment {
+  id              String                  @id @default(cuid())
+  productId       String
+  branchId        String
+  quantity        Int
+  referenceId     String?
+  reason          String?
+  type            InventoryAdjustmentType
+  createdById     String?
+  createdByUser   User?                   @relation(fields: [createdById], references: [id])
+  createdByString String?
+  createdAt       DateTime                @default(now())
+  product         Product                 @relation(fields: [productId], references: [id])
+  branch          Branch                  @relation(fields: [branchId], references: [id])
+}
+
+enum InventoryAdjustmentType {
+  PURCHASE
+  TRANSFER_IN
+  TRANSFER_OUT
+  MANUAL_ADD
+  MANUAL_REMOVE
+  RETURN
+  SALE
+}
+
+// Fixed Typo: StockTransfer instead of StockTranfer
+model StockTransfer {
+  id           String         @id @default(cuid())
+  fromBranchId String
+  toBranchId   String
+  productId    String
+  quantity     Int
+  status       TransferStatus
+  createdById  String?
+  createdBy    User?          @relation(fields: [createdById], references: [id])
+  createdAt    DateTime       @default(now())
+  fromBranch   Branch         @relation("fromBranch", fields: [fromBranchId], references: [id])
+  toBranch     Branch         @relation("toBranch", fields: [toBranchId], references: [id])
+  product      Product        @relation(fields: [productId], references: [id])
+}
+
+enum TransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model Sale {
+  id             String        @id @default(cuid())
+  invoiceNo      String        @unique
+  customerName   String?
+  customerPhone  String?
+  branchId       String
+  branch         Branch        @relation(fields: [branchId], references: [id])
+  createdById    String?
+  createdBy      User?         @relation(fields: [createdById], references: [id])
+  totalAmount    Float
+  discountAmount Float
+  finalAmount    Float
+  paymentMethod  String        @default("CASH")
+  items          SaleItem[]
+  returns        SaleReturn[]
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  journalEntryId String?
+
+  createdAt  DateTime  @default(now())
+  discount   Discount? @relation(fields: [discountId], references: [id])
+  discountId String?
+
+  couponCode String?
+}
+
+model SaleItem {
+  id        String  @id @default(cuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Float
+  subTotal  Float
+}
+
+model SaleReturn {
+  id            String           @id @default(cuid())
+  saleId        String
+  sale          Sale             @relation(fields: [saleId], references: [id])
+  returnDate    DateTime         @default(now())
+  reason        String?
+  totalRefund   Float
+  items         SaleReturnItem[]
+  processedById String?
+  processedBy   User?            @relation(fields: [processedById], references: [id])
+
+  // Link to Accounting for Refunds
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  journalEntryId String?
+}
+
+model SaleReturnItem {
+  id           String     @id @default(cuid())
+  returnId     String
+  saleReturn   SaleReturn @relation(fields: [returnId], references: [id])
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  quantity     Int
+  refundAmount Float
+}
+
+// --- ACCOUNTING MODULE ---
+
+enum AccountType {
+  CURRENT_ASSET
+  NON_CURRENT_ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+  COGS
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  type         AccountType
+  description  String?
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  description String
+  referenceId String? // Can store Invoice ID or Purchase ID string here too
+
+  // Relations to Operations (Optional but recommended)
+  sales     Sale[]
+  purchases Purchase[]
+  returns   SaleReturn[]
+
+  transactions Transaction[]
+}
+
+model Transaction {
+  id             String       @id @default(cuid())
+  accountId      String
+  account        Account      @relation(fields: [accountId], references: [id])
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  debit          Float        @default(0)
+  credit         Float        @default(0)
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model CashRequest {
+  id     String        @id @default(cuid())
+  amount Float
+  reason String
+  status RequestStatus @default(PENDING)
+
+  // Relations
+  requesterId String
+  requester   User   @relation("SentRequests", fields: [requesterId], references: [id])
+
+  // Jisne approve kiya (Manager ya Admin)
+  approverId String?
+  approver   User?   @relation("Approvals", fields: [approverId], references: [id])
+
+  branchId String? // Taake Manager sirf apni branch ki req dekhe
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
