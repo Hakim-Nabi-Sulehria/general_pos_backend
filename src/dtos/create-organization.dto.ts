@@ -1,6 +1,7 @@
 import { IsBoolean, IsEmail, IsOptional, IsString } from "class-validator";
 
-export class CreateOrganizationDto {  @IsString()
+export class CreateOrganizationDto {
+  @IsString()
   name: string;
 
   @IsEmail()

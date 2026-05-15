@@ -1,8 +1,15 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 import { RegisterDto, LoginDto } from '../dtos/create-auth.dto';
+import { BootstrapSuperadminDto } from '../dtos/bootstrap-superadmin.dto';
 
 @Injectable()
 export class AuthService {
@@ -41,6 +48,72 @@ export class AuthService {
         role: user.role,
         branchId: user.branchId
       }
+    };
+  }
+
+  /** Public: true if at least one SUPERADMIN exists (hide setup UI). */
+  async bootstrapSuperadminExists(): Promise<{ superadminExists: boolean }> {
+    const count = await this.prisma.user.count({
+      where: { role: Role.SUPERADMIN },
+    });
+    return { superadminExists: count > 0 };
+  }
+
+  /**
+   * Public one-time setup: create default organization + single SUPERADMIN.
+   * Refuses if any SUPERADMIN already exists.
+   */
+  async bootstrapSuperadmin(
+    dto: BootstrapSuperadminDto,
+    bootstrapSecretHeader?: string,
+  ) {
+    const expected = process.env.AUTH_BOOTSTRAP_SECRET?.trim();
+    if (expected) {
+      const got = bootstrapSecretHeader?.trim() ?? '';
+      if (got !== expected) {
+        throw new ForbiddenException('Invalid or missing bootstrap secret');
+      }
+    }
+
+    const existing = await this.prisma.user.count({
+      where: { role: Role.SUPERADMIN },
+    });
+    if (existing > 0) {
+      throw new ConflictException(
+        'A super admin already exists. Sign in or use an admin to add users.',
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const { password: _, ...user } = await this.prisma.$transaction(
+      async (tx) => {
+        const org = await tx.organization.create({
+          data: {
+            name: dto.orgName,
+            email: dto.orgEmail?.trim() || null,
+            address: dto.orgAddress,
+            phone: dto.orgPhone?.trim() || null,
+            currency: dto.orgCurrency?.trim() || 'PKR',
+            timezone: dto.orgTimezone?.trim() || 'UTC',
+          },
+        });
+        return tx.user.create({
+          data: {
+            email: dto.email.trim(),
+            password: hashedPassword,
+            name: dto.name.trim(),
+            role: Role.SUPERADMIN,
+            organizationId: org.id,
+            branchId: null,
+          },
+        });
+      },
+    );
+
+    return {
+      message: 'Super admin and organization created. You can sign in now.',
+      user,
     };
   }
 

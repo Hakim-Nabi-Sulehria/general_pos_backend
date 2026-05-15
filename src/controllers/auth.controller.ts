@@ -1,6 +1,15 @@
-import { Controller, Post, Body, Get, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  UseGuards,
+  Request,
+  Headers,
+} from '@nestjs/common';
 import { AuthService } from '../services/auth.service';
 import { LoginDto, RegisterDto } from '../dtos/create-auth.dto';
+import { BootstrapSuperadminDto } from '../dtos/bootstrap-superadmin.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../common/decorators/roles.decorators'; // File name check kr len
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -14,6 +23,24 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  /** Public: whether first-time super admin setup is still allowed. */
+  @Get('bootstrap/status')
+  bootstrapStatus() {
+    return this.authService.bootstrapSuperadminExists();
+  }
+
+  /**
+   * Public one-time: create organization + single SUPERADMIN if none exist.
+   * Optional env `AUTH_BOOTSTRAP_SECRET` — if set, client must send same value in header `x-auth-bootstrap-secret`.
+   */
+  @Post('bootstrap/superadmin')
+  bootstrapSuperadmin(
+    @Body() dto: BootstrapSuperadminDto,
+    @Headers('x-auth-bootstrap-secret') bootstrapSecret?: string,
+  ) {
+    return this.authService.bootstrapSuperadmin(dto, bootstrapSecret);
   }
 
   @UseGuards(AuthGuard('jwt'), RolesGuard)
