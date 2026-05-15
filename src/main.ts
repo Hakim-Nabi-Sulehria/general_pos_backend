@@ -3,20 +3,49 @@ import { AppModule } from './app.module';
 import * as bodyParser from 'body-parser';
 import { ValidationPipe } from '@nestjs/common';
 
-function corsOrigins(): string[] {
-  const fromEnv = process.env.CORS_ORIGINS?.split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-  if (fromEnv?.length) return fromEnv;
-  return ['http://localhost:8080', 'http://localhost:3000'];
+/** Merge env list with dev defaults; allow any `*.vercel.app` (production + preview deploys). */
+function corsOriginDelegate(): (
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean | string) => void,
+) => void {
+  const defaults = [
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'https://general-pos-frontend.vercel.app',
+  ];
+  const fromEnv =
+    process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean) ??
+    [];
+  const allowSet = new Set([...defaults, ...fromEnv]);
+
+  return (origin, callback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowSet.has(origin)) {
+      callback(null, origin);
+      return;
+    }
+    try {
+      const { hostname } = new URL(origin);
+      if (hostname.endsWith('.vercel.app')) {
+        callback(null, origin);
+        return;
+      }
+    } catch {
+      // ignore invalid origin URL
+    }
+    callback(null, false);
+  };
 }
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Enable CORS — set `CORS_ORIGINS` in production (comma-separated, e.g. https://app.vercel.app)
+  // CORS: defaults + `CORS_ORIGINS` + all *.vercel.app (preview URLs)
   app.enableCors({
-    origin: corsOrigins(),
+    origin: corsOriginDelegate(),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
     credentials: true,
