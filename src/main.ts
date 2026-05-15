@@ -24,13 +24,13 @@ function corsOriginDelegate(): (
       return;
     }
     if (allowSet.has(origin)) {
-      callback(null, origin);
+      callback(null, true);
       return;
     }
     try {
       const { hostname } = new URL(origin);
       if (hostname.endsWith('.vercel.app')) {
-        callback(null, origin);
+        callback(null, true);
         return;
       }
     } catch {
